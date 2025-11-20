@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  novatra-api:
+    build:
+      context: .
+      dockerfile: build/Dockerfile
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      - NOVATRA_ENVIRONMENT=development
+      - NOVATRA_DEBUG=true
+      - NEON_DATABASE_URL=postgresql://neondb_owner:Wjp.941768583@ep-noisy-mountain-a4dckdrs-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - NOVATRA_REDIS_HOST=redis
+      - NOVATRA_REDIS_PORT=6379
+      - NOVATRA_SERVER_HOST=0.0.0.0
+      - NOVATRA_SERVER_PORT=8080
+    depends_on:
+      - redis
+      - minio
+    networks:
+      - novatra-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - novatra-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+    volumes:
+      - minio_data:/data
+    networks:
+      - novatra-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    command: server /data --console-address ":9001"
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - novatra-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - novatra-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  nats:
+    image: nats:2.10-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats_data:/data
+    networks:
+      - novatra-network
+    restart: unless-stopped
+    command: ["-js", "-m", "8222", "-sd", "/data"]
+
+networks:
+  novatra-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  nats_data:
